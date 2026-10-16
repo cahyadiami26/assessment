@@ -108,7 +108,14 @@ if ($formMode === 'edit') {
 <?php if ($formMode): ?>
   <?php
     $curOpsi = $rowEdit && $rowEdit['opsi'] ? json_decode($rowEdit['opsi'], true) : ['',''];
-    $curKunci = $rowEdit && $rowEdit['kunci_jawaban'] ? json_decode($rowEdit['kunci_jawaban'], true) : [];
+    $curKunci = [];
+    if ($rowEdit && !empty($rowEdit['kunci_jawaban'])) {
+        $decoded = json_decode($rowEdit['kunci_jawaban'], true);
+        // Abaikan catatan psikotes ({note: ...}) — bukan indeks kunci
+        if (is_array($decoded) && !isset($decoded['note'])) $curKunci = $decoded;
+    }
+    $curSingle = (string)($curKunci[0] ?? '');
+    $curMulti  = array_map('strval', (array)$curKunci);
   ?>
   <div class="card">
     <div class="card-header">
@@ -116,7 +123,7 @@ if ($formMode === 'edit') {
       <a class="btn btn-ghost btn-sm" href="bank_soal.php">← Kembali ke Daftar</a>
     </div>
     <div class="card-body">
-      <form method="post" enctype="multipart/form-data">
+      <form method="post" enctype="multipart/form-data" id="soalForm">
         <?= csrfField() ?><input type="hidden" name="form" value="soal">
         <input type="hidden" name="id" value="<?= (int)($rowEdit['id'] ?? 0) ?>">
 
@@ -132,11 +139,12 @@ if ($formMode === 'edit') {
           </div>
           <div class="form-group">
             <label class="form-label">Tipe Jawaban</label>
-            <select name="tipe_jawaban" class="form-control" required onchange="this.form.submit()">
+            <select name="tipe_jawaban" class="form-control" required id="selTipeJawaban">
               <?php foreach ($tipeLabels as $k=>$v): ?>
                 <option value="<?= $k ?>" <?= ($rowEdit['tipe_jawaban'] ?? '')===$k?'selected':'' ?>><?= e($v) ?></option>
               <?php endforeach; ?>
             </select>
+            <div class="form-hint">Bagian form akan menyesuaikan otomatis sesuai tipe jawaban yang dipilih.</div>
           </div>
         </div>
 
@@ -146,9 +154,9 @@ if ($formMode === 'edit') {
           <div class="form-hint">Untuk praktik: tuliskan kasus & instruksi pengerjaan selengkap mungkin.</div>
         </div>
 
-        <?php $t = $_POST['tipe_jawaban'] ?? $rowEdit['tipe_jawaban'] ?? 'single'; ?>
+        <?php $t = $rowEdit['tipe_jawaban'] ?? 'single'; ?>
 
-        <?php if (in_array($t, ['single','multiple','forced_pair','most_least'])): ?>
+        <div id="areaOpsi" data-tipe="<?= e($t) ?>" <?= in_array($t, ['single','multiple','forced_pair','most_least']) ? '' : 'style="display:none"' ?>>
           <div class="form-group">
             <label class="form-label">Opsi Jawaban</label>
             <div id="opsiWrap">
@@ -159,46 +167,49 @@ if ($formMode === 'edit') {
             <button type="button" class="btn btn-outline btn-sm mt-1" onclick="addOpsi()">+ Tambah Opsi</button>
           </div>
 
-          <?php if ($t === 'single'): ?>
-            <div class="form-group"><label class="form-label">Kunci Jawaban</label>
-              <select name="kunci_single" class="form-control" style="max-width:300px">
-                <?php foreach ($curOpsi as $i => $o): ?>
-                  <option value="<?= $i ?>" <?= in_array((string)$i, array_map('strval',(array)($curKunci[0] ?? '')), true)?'selected':'' ?>>Opsi <?= chr(65+$i) ?>: <?= e(mb_substr($o,0,50)) ?></option>
-                <?php endforeach; ?>
-              </select>
-            </div>
-          <?php elseif ($t === 'multiple'): ?>
-            <div class="form-group"><label class="form-label">Kunci Jawaban (centang semua yang benar)</label>
+          <div class="form-group" id="kunciSingle" <?= $t==='single' ? '' : 'style="display:none"' ?>>
+            <label class="form-label">Kunci Jawaban</label>
+            <select name="kunci_single" class="form-control" style="max-width:300px">
               <?php foreach ($curOpsi as $i => $o): ?>
-                <div class="check-line"><input type="checkbox" name="kunci_multi[]" value="<?= $i ?>" <?= in_array((string)$i, array_map('strval',(array)$curKunci), true)?'checked':'' ?>> Opsi <?= chr(65+$i) ?>: <?= e(mb_substr($o,0,60)) ?></div>
+                <option value="<?= $i ?>" <?= $curSingle===(string)$i ?'selected':'' ?>>Opsi <?= chr(65+$i) ?>: <?= e(mb_substr((string)$o,0,50)) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+
+          <div class="form-group" id="kunciMulti" <?= $t==='multiple' ? '' : 'style="display:none"' ?>>
+            <label class="form-label">Kunci Jawaban (centang semua yang benar)</label>
+            <div id="kunciMultiList">
+              <?php foreach ($curOpsi as $i => $o): ?>
+                <div class="check-line"><input type="checkbox" name="kunci_multi[]" value="<?= $i ?>" <?= in_array((string)$i, $curMulti, true)?'checked':'' ?>> Opsi <?= chr(65+$i) ?>: <?= e(mb_substr((string)$o,0,60)) ?></div>
               <?php endforeach; ?>
             </div>
-          <?php else: ?>
-            <div class="alert alert-info">Tipe <strong><?= e($tipeLabels[$t]) ?></strong>: sistem menyimpan <em>jawaban mentah</em> peserta. Interpretasi, skor & rekomendasi dilakukan manual oleh HR di Portal Assessor.</div>
-          <?php endif; ?>
-        <?php endif; ?>
+          </div>
 
-        <?php if (in_array($t, ['file_upload','essay'])): ?>
-          <?php if ($t === 'file_upload'): ?>
-            <div class="form-group">
-              <label class="form-label">Contoh File Hasil Akhir (referensi — opsional)</label>
-              <input type="file" name="contoh_file" class="form-control" accept=".xlsx,.xls,.docx,.doc,.pdf,.jpg,.jpeg,.png,.pptx,.csv,.txt">
-              <?php if (!empty($rowEdit['contoh_file'])): $cf=$rowEdit['contoh_file'];?>
-                <input type="hidden" name="contoh_file_lama" value="<?= e($cf) ?>">
-                <div class="mt-1 flex items-center gap-1">
-                  <?= fileIcon($cf) ?> <a href="uploads/reference_files/<?= e($cf) ?>" target="_blank"><?= e($cf) ?></a>
-                  <?php if (isPreviewableImage($cf)): ?><img src="uploads/reference_files/<?= e($cf) ?>" style="max-height:90px;border-radius:8px;margin-left:10px"><?php endif; ?>
-                  <?php if (isPdf($cf)): ?><iframe src="uploads/reference_files/<?= e($cf) ?>" style="height:120px;width:100%;border:1px solid var(--border);border-radius:8px;margin-top:6px"></iframe><?php endif; ?>
-                </div>
-              <?php endif; ?>
-              <div class="form-hint">Format: xlsx, docx, pdf, jpg, png, pptx, csv, txt (maks 20MB). Peserta dapat melihat & mengunduh file ini saat ujian.</div>
-            </div>
-          <?php endif; ?>
+          <div class="alert alert-info" id="alertMentah" <?= in_array($t, ['forced_pair','most_least']) ? '' : 'style="display:none"' ?>>Tipe <strong><?= e($tipeLabels[$t] ?? $t) ?></strong>: sistem menyimpan <em>jawaban mentah</em> peserta. Interpretasi, skor & rekomendasi dilakukan manual oleh HR di Portal Assessor.</div>
+        </div>
+
+        <div id="areaPraktik" <?= $t==='file_upload' ? '' : 'style="display:none"' ?>>
+          <div class="form-group">
+            <label class="form-label">Contoh File Hasil Akhir (referensi — opsional)</label>
+            <input type="file" name="contoh_file" class="form-control" accept=".xlsx,.xls,.docx,.doc,.pdf,.jpg,.jpeg,.png,.pptx,.csv,.txt">
+            <?php if (!empty($rowEdit['contoh_file'])): $cf=$rowEdit['contoh_file'];?>
+              <input type="hidden" name="contoh_file_lama" value="<?= e($cf) ?>">
+              <div class="mt-1 flex items-center gap-1">
+                <?= fileIcon($cf) ?> <a href="uploads/reference_files/<?= e($cf) ?>" target="_blank"><?= e($cf) ?></a>
+                <?php if (isPreviewableImage($cf)): ?><img src="uploads/reference_files/<?= e($cf) ?>" style="max-height:90px;border-radius:8px;margin-left:10px"><?php endif; ?>
+                <?php if (isPdf($cf)): ?><iframe src="uploads/reference_files/<?= e($cf) ?>" style="height:120px;width:100%;border:1px solid var(--border);border-radius:8px;margin-top:6px"></iframe><?php endif; ?>
+              </div>
+            <?php endif; ?>
+            <div class="form-hint">Format: xlsx, docx, pdf, jpg, png, pptx, csv, txt (maks 20MB). Peserta dapat melihat & mengunduh file ini saat ujian.</div>
+          </div>
+        </div>
+
+        <div id="areaRubrik" <?= in_array($t, ['file_upload','essay']) ? '' : 'style="display:none"' ?>>
           <div class="form-group">
             <label class="form-label">Rubrik Penilaian (untuk HR)</label>
             <textarea name="rubrik" class="form-control" rows="3" placeholder="Aspek yang dinilai, rentang skor..."><?= e($rowEdit['rubrik'] ?? '') ?></textarea>
           </div>
-        <?php endif; ?>
+        </div>
 
         <div class="form-row">
           <div class="form-group"><label class="form-label">Bobot Soal</label>
@@ -218,13 +229,78 @@ if ($formMode === 'edit') {
     </div>
   </div>
   <script>
+    var TIPE_LABEL = <?= json_encode($tipeLabels) ?>;
     function addOpsi(){
       var w=document.getElementById('opsiWrap');
       var n=w.querySelectorAll('input').length;
       var d=document.createElement('div'); d.className='check-line';
       d.innerHTML='<input type="text" name="opsi[]" class="form-control" placeholder="Opsi '+String.fromCharCode(65+n)+'">';
       w.appendChild(d);
+      syncKunciList();
     }
+
+    // Sinkronkan daftar kunci (single & multiple) dengan opsi yang ada
+    function getOpsis(){
+      return Array.prototype.map.call(
+        document.querySelectorAll('#opsiWrap input[name="opsi[]"]'),
+        function(inp,i){ return {idx:i, val:inp.value}; }
+      );
+    }
+    function syncKunciList(){
+      var optis=getOpsis();
+      // Kunci single
+      var sel=document.querySelector('#kunciSingle select');
+      if(sel){
+        var prev=sel.value;
+        sel.innerHTML='';
+        optis.forEach(function(o){
+          var el=document.createElement('option');
+          el.value=o.idx;
+          el.textContent='Opsi '+String.fromCharCode(65+o.idx)+': '+(o.val||'(kosong)').substring(0,50);
+          sel.appendChild(el);
+        });
+        if(optis.some(function(o){return String(o.idx)===prev;})) sel.value=prev;
+      }
+      // Kunci multiple — pertahankan status centang per indeks
+      var mList=document.getElementById('kunciMultiList');
+      if(mList){
+        var checked={};
+        mList.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+          if(cb.checked) checked[cb.value]=true;
+        });
+        mList.innerHTML='';
+        optis.forEach(function(o){
+          var div=document.createElement('div'); div.className='check-line';
+          var cb=document.createElement('input');
+          cb.type='checkbox'; cb.name='kunci_multi[]'; cb.value=o.idx;
+          if(checked[String(o.idx)]) cb.checked=true;
+          div.appendChild(cb);
+          div.appendChild(document.createTextNode(' Opsi '+String.fromCharCode(65+o.idx)+': '+(o.val||'(kosong)').substring(0,60)));
+          mList.appendChild(div);
+        });
+      }
+    }
+
+    // Tampilkan/sembunyikan bagian form sesuai tipe jawaban (tanpa reload)
+    function terapkanTipe(t){
+      var isPilihan = ['single','multiple','forced_pair','most_least'].indexOf(t) !== -1;
+      document.getElementById('areaOpsi').style.display     = isPilihan ? '' : 'none';
+      document.getElementById('areaPraktik').style.display  = (t==='file_upload') ? '' : 'none';
+      document.getElementById('areaRubrik').style.display   = (t==='file_upload'||t==='essay') ? '' : 'none';
+      document.getElementById('kunciSingle').style.display  = (t==='single') ? '' : 'none';
+      document.getElementById('kunciMulti').style.display   = (t==='multiple') ? '' : 'none';
+      var alertM=document.getElementById('alertMentah');
+      if(alertM){
+        alertM.style.display = (t==='forced_pair'||t==='most_least') ? '' : 'none';
+        alertM.innerHTML = 'Tipe <strong>'+TIPE_LABEL[t]+'</strong>: sistem menyimpan <em>jawaban mentah</em> peserta. Interpretasi, skor & rekomendasi dilakukan manual oleh HR di Portal Assessor.';
+      }
+      syncKunciList();
+    }
+
+    document.getElementById('selTipeJawaban').addEventListener('change', function(){
+      terapkanTipe(this.value);
+    });
+    document.getElementById('opsiWrap').addEventListener('input', syncKunciList);
   </script>
 
 <?php else: ?>
