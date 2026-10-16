@@ -4,6 +4,7 @@
  * Susun modul: ambil soal dari Bank Soal (manual/acak), durasi, pengacakan.
  */
 require_once __DIR__ . '/config/app.php';
+require_once __DIR__ . '/includes/functions.php';
 requireSsoLogin();
 refreshSessionFromUsers();
 if (!isHrd()) { http_response_code(403); exit('Akses ditolak: halaman ini khusus HRD/Admin.'); }
@@ -57,7 +58,7 @@ if (isPost() && ($_POST['form'] ?? '') === 'hapus') {
 
 /* ---------- Data tampilan ---------- */
 $categories = $db->query('SELECT * FROM question_categories ORDER BY name')->fetchAll();
-$allQuestions = $db->query('SELECT q.id, q.tipe_jawaban, q.pertanyaan, q.bobot, c.name AS kat FROM questions q JOIN question_categories c ON c.id=q.category_id WHERE q.status="aktif" ORDER BY q.id DESC')->fetchAll();
+$allQuestions = $db->query('SELECT q.id, q.category_id, q.tipe_jawaban, q.pertanyaan, q.bobot, c.name AS kat FROM questions q JOIN question_categories c ON c.id=q.category_id WHERE q.status="aktif" ORDER BY q.id DESC')->fetchAll();
 
 $pageTitle = 'Modul Tes'; $activeMenu = 'modul';
 require_once __DIR__ . '/includes/header.php';
@@ -108,14 +109,49 @@ if ($formMode === 'edit') {
 
         <div>
           <label class="form-label">Pilih Soal dari Bank Soal <span class="text-muted" style="font-weight:400">(<span id="selCount">0</span> dipilih)</span></label>
-          <input type="text" id="qSearch" class="form-control mb-1" placeholder="Cari soal...">
+
+          <!-- Alat bantu seleksi cepat -->
+          <div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--bg,#f6f7fb)">
+            <div class="form-row" style="gap:8px;align-items:flex-end">
+              <div class="form-group" style="margin:0;flex:1;min-width:150px">
+                <label class="form-label" style="font-size:11.5px">Kategori Soal</label>
+                <select id="pickCat" class="form-control">
+                  <option value="">— Pilih kategori —</option>
+                  <?php foreach ($categories as $c): ?>
+                    <option value="<?= (int)$c['id'] ?>"><?= e($c['name']) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0;width:110px">
+                <label class="form-label" style="font-size:11.5px">Jumlah N (acak)</label>
+                <input type="number" id="pickN" class="form-control" min="1" placeholder="mis. 10">
+              </div>
+            </div>
+            <div class="flex gap-1 mt-1" style="flex-wrap:wrap">
+              <button type="button" class="btn btn-outline btn-sm" onclick="ambilKategori(false)" title="Tandai centang semua soal pada kategori terpilih">Ambil dari kategori</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="ambilKategori(true)" title="Hanya soal kategori ini yang tercentang (ganti pilihan lain)">Ambil SEMUA dari kategori</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="ambilAcakKategori()" title="Centang acak sejumlah N soal dari kategori terpilih">Ambil acak N dari kategori</button>
+              <span style="flex:1"></span>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="setAllVisible(true)">Pilih tampil</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="setAllVisible(false)">Kosongkan tampil</button>
+            </div>
+          </div>
+
+          <input type="text" id="qSearch" class="form-control" placeholder="Cari soal..." style="margin-bottom:8px">
+          <select id="filterKatList" class="form-control" onchange="terapkanFilter()" style="margin-bottom:8px">
+            <option value="">— Tampilkan semua kategori dalam daftar —</option>
+            <?php foreach ($categories as $c): ?>
+              <option value="<?= (int)$c['id'] ?>"><?= e($c['name']) ?></option>
+            <?php endforeach; ?>
+          </select>
           <div style="max-height:430px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px">
             <?php foreach ($allQuestions as $q): ?>
-              <label class="check-line q-item" data-text="<?= e(mb_strtolower(substr(preg_replace('/\s+/',' ',$q['pertanyaan']),0,180))) ?>">
+              <label class="check-line q-item" data-cat="<?= (int)$q['category_id'] ?>" data-qid="<?= (int)$q['id'] ?>" data-text="<?= e(mb_strtolower(substr(preg_replace('/\s+/',' ',$q['pertanyaan']),0,180))) ?>">
                 <input type="checkbox" name="question_ids[]" value="<?= $q['id'] ?>" <?= in_array($q['id'],$modQids)?'checked':'' ?> onchange="updateSel()">
                 <span style="font-size:12.5px"><?= fileIcon('') ?> <b>#<?= $q['id'] ?></b> [<?= e($q['kat']) ?>] <?= e(mb_strimwidth(preg_replace('/\s+/',' ',$q['pertanyaan']),0,90,'…')) ?></span>
               </label>
             <?php endforeach; ?>
+            <div id="qNone" style="display:none;padding:16px;text-align:center;color:var(--muted,#888)">Tidak ada soal yang cocok dengan filter.</div>
           </div>
         </div>
       </div>
@@ -129,10 +165,65 @@ if ($formMode === 'edit') {
 </div>
 <script>
 function updateSel(){ document.getElementById('selCount').textContent = document.querySelectorAll('input[name="question_ids[]"]:checked').length; }
-document.getElementById('qSearch').addEventListener('input', function(){
-  var v=this.value.toLowerCase();
-  document.querySelectorAll('.q-item').forEach(function(el){ el.style.display = el.dataset.text.includes(v) ? '' : 'none'; });
-});
+
+function terapkanFilter(){
+  var v = document.getElementById('qSearch').value.toLowerCase();
+  var kat = document.getElementById('filterKatList').value;
+  var terlihat = 0;
+  document.querySelectorAll('.q-item').forEach(function(el){
+    var okText = el.dataset.text.includes(v);
+    var okKat  = !kat || el.dataset.cat === kat;
+    var show   = okText && okKat;
+    el.style.display = show ? '' : 'none';
+    if (show) terlihat++;
+  });
+  document.getElementById('qNone').style.display = terlihat ? 'none' : '';
+}
+document.getElementById('qSearch').addEventListener('input', terapkanFilter);
+
+function itemsKategori(idKat){
+  return Array.prototype.slice.call(document.querySelectorAll('.q-item[data-cat="'+idKat+'"]'));
+}
+function cekBox(el){ return el.querySelector('input[type="checkbox"]'); }
+
+// Ambil soal dari kategori terpilih (append) atau replace=true (hanya kategori tsb yang tercentang)
+function ambilKategori(replace){
+  var kat = document.getElementById('pickCat').value;
+  if(!kat){ alert('Pilih kategori soal terlebih dahulu.'); return; }
+  var items = itemsKategori(kat);
+  if(!items.length){ alert('Tidak ada soal aktif pada kategori tersebut.'); return; }
+  if(replace){
+    document.querySelectorAll('input[name="question_ids[]"]').forEach(function(cb){ cb.checked=false; });
+  }
+  items.forEach(function(el){ cekBox(el).checked = true; });
+  updateSel();
+}
+
+// Ambil acak sejumlah N soal dari kategori terpilih (append ke pilihan yang ada, tanpa duplikasi)
+function ambilAcakKategori(){
+  var kat = document.getElementById('pickCat').value;
+  var n = parseInt(document.getElementById('pickN').value || '0', 10);
+  if(!kat){ alert('Pilih kategori soal terlebih dahulu.'); return; }
+  if(!n || n < 1){ alert('Isi jumlah N (acak) terlebih dahulu.'); return; }
+  var items = itemsKategori(kat);
+  if(!items.length){ alert('Tidak ada soal aktif pada kategori tersebut.'); return; }
+  // Fisher-Yates shuffle
+  for (var i = items.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = items[i]; items[i] = items[j]; items[j] = t;
+  }
+  var tercentang = 0;
+  items.slice(0, n).forEach(function(el){ cekBox(el).checked = true; tercentang++; });
+  if (n > items.length) alert('Soal tersedia hanya ' + items.length + ' pada kategori ini, semuanya diambil.');
+  updateSel();
+}
+
+function setAllVisible(state){
+  document.querySelectorAll('.q-item').forEach(function(el){
+    if (el.style.display !== 'none') cekBox(el).checked = state;
+  });
+  updateSel();
+}
 updateSel();
 </script>
 
