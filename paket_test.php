@@ -118,7 +118,7 @@ if ($aksi === 'detail' && $idPaket) {
                 u.position AS user_position, u.division AS user_division, u.department AS user_department,
                 (SELECT COUNT(*) FROM exam_attempts ea WHERE ea.participant_id=pp.id AND ea.status IN ("submitted","reviewed")) AS modul_selesai
          FROM package_participants pp
-         LEFT JOIN users u ON u.id = pp.user_id
+         LEFT JOIN ' . usersTable() . ' u ON u.id = pp.user_id
          WHERE pp.package_id=? ORDER BY pp.id DESC'
     );
     $parts->execute([$idPaket]); $parts = $parts->fetchAll();
