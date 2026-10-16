@@ -1,0 +1,27 @@
+# ============================================================
+# E-Assessment PT Lampung Jasa Utama - https://assessment.lju.co.id
+# ============================================================
+
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Paksa HTTPS
+    RewriteCond %{HTTPS} !=on
+    RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
+
+    # Blokir akses langsung ke folder internal
+    RewriteRule ^(config|database|includes|lib|storage|vendor)(/.*)?$ - [F,L]
+</IfModule>
+
+# Proteksi tambahan via directory-level deny
+<FilesMatch "\.(sql|log|md)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

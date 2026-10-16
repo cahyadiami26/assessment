@@ -1,0 +1,6 @@
+# Folder upload: larang eksekusi skrip apa pun
+<FilesMatch "\.(php|phtml|php3|php4|php5|pl|py|cgi)$">
+    Require all denied
+</FilesMatch>
+Options -Indexes -ExecCGI
+AddType text/plain .php .phtml .php5
