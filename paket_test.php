@@ -250,8 +250,15 @@ if (in_array($aksi, ['tambah','edit'])) {
     $selMods = [];
     if ($aksi === 'edit' && $idPaket) {
         $st = $db->prepare('SELECT * FROM test_packages WHERE id=?'); $st->execute([$idPaket]);
-        if ($st->fetch()) { $p = $st->fetch();
-            $selMods = array_column($db->query('SELECT module_id FROM package_modules WHERE package_id='.$idPaket)->fetchAll(), 'module_id'); }
+        $row = $st->fetch();
+        if ($row) {
+            // gabungkan dengan default agar key selalu ada & tidak warning
+            $p = array_merge($p, $row);
+            $selMods = array_map('intval', array_column(
+                $db->query('SELECT module_id FROM package_modules WHERE package_id=' . $idPaket)->fetchAll(),
+                'module_id'
+            ));
+        }
     }
     $allModules = $db->query('SELECT * FROM test_modules WHERE status="aktif" ORDER BY nama')->fetchAll();
     ?>
