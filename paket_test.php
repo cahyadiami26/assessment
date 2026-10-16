@@ -112,7 +112,15 @@ if ($aksi === 'detail' && $idPaket) {
     if (!$p) { echo '<div class="alert alert-danger">Paket tidak ditemukan.</div>'; require __DIR__.'/includes/footer.php'; exit; }
 
     $mods = $db->query('SELECT m.* FROM package_modules pm JOIN test_modules m ON m.id=pm.module_id WHERE pm.package_id='.$idPaket.' ORDER BY pm.urutan')->fetchAll();
-    $parts = $db->prepare('SELECT pp.*, (SELECT COUNT(*) FROM exam_attempts ea WHERE ea.participant_id=pp.id AND ea.status IN ("submitted","reviewed")) AS modul_selesai FROM package_participants pp WHERE pp.package_id=? ORDER BY pp.id DESC');
+    // Join ke tabel users (db SSO) agar peserta karyawan menampilkan nama asli, bukan "Karyawan #ID"
+    $parts = $db->prepare(
+        'SELECT pp.*, u.name AS user_name, u.email AS user_email, u.avatar AS user_avatar,
+                u.position AS user_position, u.division AS user_division, u.department AS user_department,
+                (SELECT COUNT(*) FROM exam_attempts ea WHERE ea.participant_id=pp.id AND ea.status IN ("submitted","reviewed")) AS modul_selesai
+         FROM package_participants pp
+         LEFT JOIN users u ON u.id = pp.user_id
+         WHERE pp.package_id=? ORDER BY pp.id DESC'
+    );
     $parts->execute([$idPaket]); $parts = $parts->fetchAll();
 
     $allModules = $db->query('SELECT * FROM test_modules WHERE status="aktif" ORDER BY nama')->fetchAll();
@@ -144,10 +152,21 @@ if ($aksi === 'detail' && $idPaket) {
       <div class="table-wrap"><table class="data">
         <thead><tr><th>Peserta</th><th>Akses</th><th>Progress</th><th></th></tr></thead><tbody>
         <?php foreach ($parts as $ps):
-          $nm = $ps['candidate_name'] ?: ('Karyawan #' . $ps['user_id']); ?>
+          // Nama peserta: pakai nama karyawan dari tabel users bila participant_type = employee
+          if ($ps['participant_type'] === 'employee') {
+              $nm    = $ps['user_name'] ?: ($ps['candidate_name'] ?: ('Karyawan #' . $ps['user_id']));
+              $email = $ps['user_email'] ?: '';
+              $avatarFile = $ps['user_avatar'];
+              $sub = trim(($ps['user_position'] ? e($ps['user_position']) : '') . ($ps['user_division'] ? ' · Bidang ' . e($ps['user_division']) : '') . ($ps['user_department'] ? ' · Divisi ' . e($ps['user_department']) : ''), ' ·');
+          } else {
+              $nm    = $ps['candidate_name'] ?: 'Calon Karyawan';
+              $email = $ps['candidate_email'] ?: '';
+              $avatarFile = null;
+              $sub = '';
+          } ?>
           <tr>
-            <td><div class="cell-user"><?= renderAvatar(null, $nm, 'avatar-sm') ?><div><strong><?= e($nm) ?></strong>
-              <div class="text-muted" style="font-size:12px"><?= e($ps['candidate_email'] ?: '') ?></div></div></div></td>
+            <td><div class="cell-user"><?= renderAvatar($avatarFile, $nm, 'avatar-sm') ?><div><strong><?= e($nm) ?></strong>
+              <div class="text-muted" style="font-size:12px"><?= $sub !== '' ? $sub : e($email) ?></div></div></div></td>
             <td><?= $ps['participant_type']==='employee' ? '<span class="badge badge-info">SSO</span>' : '<span class="badge badge-gold" title="'.e($ps['access_token']).'">Token: '.e(substr((string)$ps['access_token'],0,8)).'…</span>' ?></td>
             <td><?= (int)$ps['modul_selesai'] ?>/<?= count($mods) ?> modul<br><span class="badge badge-<?= $ps['status']==='finished'?'success':'muted' ?>"><?= e($ps['status']) ?></span></td>
             <td><form method="post" onsubmit="return confirm('Hapus peserta?')"><?= csrfField() ?>
@@ -163,7 +182,8 @@ if ($aksi === 'detail' && $idPaket) {
           <input type="hidden" name="form" value="employee"><input type="hidden" name="package_id" value="<?= $p['id'] ?>">
           <input type="hidden" name="user_ids" id="user_ids" value="">
           <input type="text" id="empSearch" class="form-control mb-1" placeholder="Cari nama / NIK / email karyawan...">
-          <div id="empList" style="max-height:230px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px"></div>
+          <div class="form-hint mb-1" id="empInfo">Memuat daftar karyawan...</div>
+          <div id="empList" style="max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px"></div>
           <button class="btn btn-primary btn-sm mt-2">Tambahkan Terpilih</button>
         </form>
       </div></div>
@@ -180,23 +200,44 @@ if ($aksi === 'detail' && $idPaket) {
     </div>
 
     <script>
-    // Pencarian karyawan dari db SSO (endpoint users_lookup.php)
+    // Daftar & pencarian karyawan dari db SSO (endpoint users_lookup.php)
     const empList = document.getElementById('empList');
+    const empInfo = document.getElementById('empInfo');
+    const existingIds = new Set([<?= implode(',', array_map('intval', array_filter(array_column($parts, 'user_id')))) ?>]);
+
+    function escJs(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    function renderEmp(rows){
+      if(!rows.length){ empList.innerHTML = '<div class="text-muted">Tidak ada karyawan ditemukan.</div>'; return; }
+      empList.innerHTML = rows.map(u=>{
+        const meta = [u.position, u.division ? 'Bidang '+u.division : '', u.email].filter(Boolean).map(escJs).join(' · ');
+        const added = existingIds.has(u.id);
+        return `<label class="check-line"><input type="checkbox" value="${u.id}" ${added?'disabled checked':'onchange="syncIds()"'}>
+          <span><b>${escJs(u.name)}</b> <span style="color:var(--muted);font-size:12px">${meta}</span>
+          ${added?'<span class="badge badge-success" style="margin-left:6px">sudah peserta</span>':''}</span></label>`;
+      }).join('');
+      syncIds();
+    }
+
     let empTimer;
+    function loadEmp(q){
+      empInfo.textContent = 'Memuat...';
+      fetch('users_lookup.php?q='+encodeURIComponent(q)).then(r=>r.json()).then(rows=>{
+        empInfo.textContent = rows.length + ' karyawan ditampilkan' + (q ? ' untuk "'+q+'"' : ' (daftar aktif — ketik untuk mencari)');
+        renderEmp(rows);
+      }).catch(()=>{ empInfo.textContent = 'Gagal memuat daftar karyawan.'; });
+    }
     document.getElementById('empSearch').addEventListener('input', function(){
       clearTimeout(empTimer);
-      const q = this.value;
-      empTimer = setTimeout(()=>{
-        fetch('users_lookup.php?q='+encodeURIComponent(q)).then(r=>r.json()).then(rows=>{
-          empList.innerHTML = rows.map(u=>`<label class="check-line"><input type="checkbox" value="${u.id}" onchange="syncIds()"> <span><b>${u.name}</b> <span style="color:var(--muted);font-size:12px">${u.position||''} · ${u.division||''}</span></span></label>`).join('') || '<div class="text-muted">Tidak ditemukan.</div>';
-          syncIds();
-        });
-      }, 350);
+      const q = this.value.trim();
+      empTimer = setTimeout(()=>loadEmp(q), 350);
     });
     function syncIds(){
-      const ids=[...empList.querySelectorAll('input:checked')].map(i=>i.value);
+      const ids=[...empList.querySelectorAll('input:checked:not(:disabled)')].map(i=>i.value);
       document.getElementById('user_ids').value = ids.join(',');
     }
+    // Tampilkan daftar awal tanpa harus mengetik di pencarian
+    loadEmp('');
     </script>
     <?php
     require_once __DIR__ . '/includes/footer.php';
