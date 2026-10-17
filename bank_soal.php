@@ -28,10 +28,11 @@ if (isPost() && ($_POST['form'] ?? '') === 'soal') {
     $opsi = array_values(array_filter(array_map('trim', $_POST['opsi'] ?? [])));
     $opsiJson = $opsi ? json_encode($opsi) : null;
 
-    // Kunci jawaban
+    // Kunci jawaban — disimpan ternormalisasi sebagai indeks berbasis 0 (mis. ["2"] / ["0","3"])
+    // agar konsisten dengan nilai input peserta & auto-grading tidak bergantung format lama.
     $kunci = null;
-    if ($tipe === 'single')   $kunci = json_encode([$_POST['kunci_single'] ?? '']);
-    if ($tipe === 'multiple') $kunci = json_encode(array_values($_POST['kunci_multi'] ?? []));
+    if ($tipe === 'single')   $kunci = json_encode(normalizeAnswerKeys([$_POST['kunci_single'] ?? ''], count($opsi)));
+    if ($tipe === 'multiple') $kunci = json_encode(normalizeAnswerKeys($_POST['kunci_multi'] ?? [], count($opsi)));
     if ($tipe === 'forced_pair' || $tipe === 'most_least') $kunci = json_encode(['note' => 'skor mentah disimpan, interpretasi manual HR']);
 
     // Upload contoh file hasil akhir (referensi praktik)
@@ -108,12 +109,11 @@ if ($formMode === 'edit') {
 <?php if ($formMode): ?>
   <?php
     $curOpsi = $rowEdit && $rowEdit['opsi'] ? json_decode($rowEdit['opsi'], true) : ['',''];
-    $curKunci = [];
-    if ($rowEdit && !empty($rowEdit['kunci_jawaban'])) {
-        $decoded = json_decode($rowEdit['kunci_jawaban'], true);
-        // Abaikan catatan psikotes ({note: ...}) — bukan indeks kunci
-        if (is_array($decoded) && !isset($decoded['note'])) $curKunci = $decoded;
-    }
+    // Normalisasi kunci lama (label "A"/"B") -> indeks berbasis 0 agar terpilih di form edit
+    $curKunci = ($rowEdit && !empty($rowEdit['kunci_jawaban']))
+        ? normalizeAnswerKeys($rowEdit['kunci_jawaban'], count((array)$curOpsi))
+        : [];
+    // ensure numeric strings only for selection matching
     $curSingle = (string)($curKunci[0] ?? '');
     $curMulti  = array_map('strval', (array)$curKunci);
   ?>

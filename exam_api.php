@@ -112,16 +112,16 @@ if ($action === 'submit') {
     }
 
     /* ---- Auto-grade soal single & multiple ---- */
-    $rows = $db->prepare('SELECT ans.id, ans.answer_options, q.kunci_jawaban, q.bobot, q.tipe_jawaban
+    // Sertakan q.opsi agar jumlah opsi diketahui -> kunci label huruf ("A".."Z")
+    // dinormalkan ke indeks berbasis 0 sebelum dibandingkan.
+    $rows = $db->prepare('SELECT ans.id, ans.answer_options, q.kunci_jawaban, q.bobot, q.tipe_jawaban, q.opsi
                           FROM exam_answers ans JOIN questions q ON q.id=ans.question_id
                           WHERE ans.attempt_id=? AND q.tipe_jawaban IN ("single","multiple")');
     $rows->execute([$attemptId]);
     $totalGot = 0.0; $totalMax = 0.0;
     foreach ($rows->fetchAll() as $r) {
-        $kunci = array_map('strval', (array)json_decode((string)$r['kunci_jawaban'], true));
-        $resp  = array_map('strval', (array)json_decode((string)$r['answer_options'], true));
-        sort($kunci); sort($resp);
-        $correct = ($resp == $kunci);
+        $numOpts = is_countable(json_decode((string)$r['opsi'], true)) ? count(json_decode((string)$r['opsi'], true)) : 0;
+        $correct = answersMatch($r['answer_options'], $r['kunci_jawaban'], $numOpts);
         $pts = $correct ? (float)$r['bobot'] : 0.0;
         $totalGot += $pts; $totalMax += (float)$r['bobot'];
         $db->prepare('UPDATE exam_answers SET is_correct=?, points_awarded=?, review_status="auto" WHERE id=?')
