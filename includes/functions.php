@@ -108,3 +108,66 @@ function fileIcon(?string $f): string
         default            => '📎',
     };
 }
+
+/**
+ * Konsolidasi skor SATU attempt: gabungan auto-grading + nilai manual HR.
+ * - Skor manual dihitung dari agregat jawaban esai/file_upload yang review_status='reviewed'
+ *   (poin didapat / bobot maksimal × 100). Bila psikotes memberi skor manual numerik eksplisit
+ *   ($skorManualOverride) dan tidak ada soal esai/praktik, nilai tsb dipakai langsung.
+ * - Status attempt → 'reviewed' HANYA bila semua jawaban yang butuh review manual sudah dinilai
+ *   (atau memang tidak ada), sehingga badge "Menunggu Review" hilang setelah HR selesai menilai.
+ * - final_score = rata-rata score_auto & score_manual (bila keduanya ada).
+ */
+function recalcAttemptScore(PDO $db, int $attemptId, ?float $skorManualOverride = null): void
+{
+    $att = $db->prepare('SELECT id, status, score_auto FROM exam_attempts WHERE id=?');
+    $att->execute([$attemptId]);
+    $a = $att->fetch();
+    if (!$a || $a['status'] === 'in_progress' || $a['status'] === 'not_started') return;
+
+    /* ---- Skor manual dari jawaban esai/praktik yang sudah direview ---- */
+    $mm = $db->prepare('SELECT SUM(CASE WHEN ans.review_status="reviewed" THEN ans.points_awarded END) got,
+                               SUM(CASE WHEN ans.review_status="reviewed" THEN q.bobot END)   maxb,
+                               COUNT(*) n_total,
+                               SUM(CASE WHEN q.tipe_jawaban IN ("essay","file_upload") AND ans.review_status<>"reviewed" THEN 1 ELSE 0 END) n_pending_manual
+                        FROM exam_answers ans JOIN questions q ON q.id=ans.question_id
+                        WHERE ans.attempt_id=? AND q.tipe_jawaban IN ("essay","file_upload")');
+    $mm->execute([$attemptId]);
+    $m = $mm->fetch();
+
+    $manual = null;
+    if ((float)$m['maxb'] > 0) {
+        $manual = round((float)$m['got'] / (float)$m['maxb'] * 100, 2);
+    } elseif ($skorManualOverride !== null) {
+        $manual = round($skorManualOverride, 2);
+    }
+    //gabungkan: jika ada override DAN agregat manual, pakai rata-ratanya
+    if ($skorManualOverride !== null && $manual !== null && $manual !== round($skorManualOverride, 2)) {
+        $manual = round(($manual + $skorManualOverride) / 2, 2);
+    }
+
+    /* ---- Cek sisa pekerjaan review lain (psikotes utk modul personality) ---- */
+    $nPendingAny = (int)$db->query('SELECT COUNT(*) FROM exam_answers WHERE attempt_id=' . $attemptId . " AND review_status='pending'")->fetchColumn();
+    $isPsycho = (bool)$db->query(
+        "SELECT COUNT(*) FROM exam_answers ans JOIN questions q ON q.id=ans.question_id
+         JOIN question_categories c ON c.id=q.category_id AND c.test_type='personality'
+         WHERE ans.attempt_id=$attemptId")->fetchColumn();
+    $psyDone = true;
+    if ($isPsycho) {
+        $psyDone = (bool)$db->query("SELECT COUNT(*) FROM psycho_evaluations WHERE attempt_id=$attemptId
+                                     AND rekomendasi IS NOT NULL AND rekomendasi<>''")->fetchColumn();
+    }
+
+    $selesaiReview = ($nPendingAny === 0) && $psyDone;
+
+    /* ---- Final score: rata-rata berbobot auto & manual ---- */
+    $auto = $a['score_auto'] !== null ? (float)$a['score_auto'] : null;
+    $final = null;
+    if ($auto !== null && $manual !== null) $final = round(($auto + $manual) / 2, 2);
+    elseif ($auto !== null)                 $final = $auto;
+    elseif ($manual !== null)               $final = $manual;
+
+    $newStatus = $selesaiReview ? 'reviewed' : $a['status'];
+    $db->prepare('UPDATE exam_attempts SET score_manual=?, final_score=?, status=? WHERE id=?')
+       ->execute([$manual, $final, $newStatus, $attemptId]);
+}

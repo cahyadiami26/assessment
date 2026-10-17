@@ -14,6 +14,12 @@ require_once __DIR__ . '/includes/functions.php';
 $db = getAppDb();
 $attemptId = (int)($_GET['attempt'] ?? 0);
 
+/* Auto-migration ringan: pastikan kolom skor_manual ada di psycho_evaluations */
+try {
+    $col = $db->query("SHOW COLUMNS FROM psycho_evaluations LIKE 'skor_manual'")->fetch();
+    if (!$col) $db->exec('ALTER TABLE psycho_evaluations ADD COLUMN skor_manual DECIMAL(6,2) NULL AFTER catatan_hr');
+} catch (Throwable $e) {}
+
 /* ---------- Ambil data attempt + peserta ---------- */
 $st = $db->prepare('SELECT a.*, m.nama AS modul_nama, m.id AS mid, p.nama AS paket_nama, pp.*, 
                     cat.test_type AS mod_test_type
@@ -42,9 +48,11 @@ if (isPost() && ($_POST['form'] ?? '') === 'grade') {
     $ansId = (int)$_POST['answer_id'];
     $pts   = (float)$_POST['points_awarded'];
     $notes = trim($_POST['reviewer_notes'] ?? '');
-    $db->prepare('UPDATE exam_answers SET points_awarded=?, reviewer_notes=?, reviewed_by=?, review_status="reviewed" WHERE id=?')
+    $db->prepare('UPDATE exam_answers SET points_awarded=?, is_correct=NULL, reviewer_notes=?, reviewed_by=?, review_status="reviewed" WHERE id=?')
        ->execute([$pts, $notes, $_SESSION['user_id'], $ansId]);
-    flash('success', 'Penilaian tersimpan.');
+    // Konsolidasi skor otomatis setiap kali HR menyimpan nilai manual
+    recalcAttemptScore($db, $attemptId);
+    flash('success', 'Penilaian tersimpan & skor direkalkulasi.');
     header("Location: hr_review_detail.php?attempt=$attemptId"); exit;
 }
 
@@ -55,6 +63,7 @@ if (isPost() && ($_POST['form'] ?? '') === 'psycho') {
     $lebih= trim($_POST['kelebihan'] ?? '');
     $area = trim($_POST['area_pengembangan'] ?? '');
     $cat  = trim($_POST['catatan_hr'] ?? '');
+    $skorManualPsy = ($_POST['score_manual'] ?? '') !== '' ? (float)$_POST['score_manual'] : null;
 
     // Skor manual utk attempt ini (dari jawaban esai/praktik yang direview) dihitung otomatis;
     // field skor_manual opsional di form dipakai utk psikotes murni tanpa soal bernilai.
@@ -62,39 +71,22 @@ if (isPost() && ($_POST['form'] ?? '') === 'psycho') {
     $baru = handleUpload($_FILES['lampiran_pdf'] ?? [], 'psychotes_reports', ['pdf'], 20);
     if ($baru) $pdfLama = $baru;
 
-    $db->prepare('INSERT INTO psycho_evaluations (attempt_id, rekomendasi, kelebihan, area_pengembangan, catatan_hr, lampiran_pdf, evaluated_by)
-                  VALUES (?,?,?,?,?,?,?)
+    $db->prepare('INSERT INTO psycho_evaluations (attempt_id, rekomendasi, kelebihan, area_pengembangan, catatan_hr, skor_manual, lampiran_pdf, evaluated_by)
+                  VALUES (?,?,?,?,?,?,?,?)
                   ON DUPLICATE KEY UPDATE rekomendasi=VALUES(rekomendasi), kelebihan=VALUES(kelebihan),
                     area_pengembangan=VALUES(area_pengembangan), catatan_hr=VALUES(catatan_hr),
+                    skor_manual=VALUES(skor_manual),
                     lampiran_pdf=VALUES(lampiran_pdf), evaluated_by=VALUES(evaluated_by), evaluated_at=NOW()')
-       ->execute([$attemptId, $rek, $lebih, $area, $cat, $pdfLama, $_SESSION['user_id']]);
+       ->execute([$attemptId, $rek, $lebih, $area, $cat, $skorManualPsy, $pdfLama, $_SESSION['user_id']]);
 
-    /* Konsolidasi Skor Akhir: rata-rata seluruh attempt paket */
-    recalcFinalScores($db, (int)$att['participant_id']);
+    /* Konsolidasi Skor Akhir attempt ini + seluruh attempt paket peserta */
+    recalcAttemptScore($db, $attemptId, $skorManualPsy);
+    // Rekap attempt lain milik peserta pada paket yang sama (jika belum dihitung)
+    foreach ($db->query('SELECT id FROM exam_attempts WHERE participant_id=' . (int)$att['participant_id'])->fetchAll() as $other) {
+        if ((int)$other['id'] !== $attemptId) recalcAttemptScore($db, (int)$other['id']);
+    }
     flash('success', 'Evaluasi psikotes disimpan & skor akhir dikonsolidasi.');
     header("Location: hr_review_detail.php?attempt=$attemptId"); exit;
-}
-
-/** Hitung final_score per attempt: gabungan auto + manual (rerata berbobot). */
-function recalcFinalScores(PDO $db, int $participantId): void
-{
-    $attempts = $db->query('SELECT * FROM exam_attempts WHERE participant_id=' . $participantId)->fetchAll();
-    foreach ($attempts as $a) {
-        // manual score dari agregat jawaban yang direview (esai/praktik): pts/referensi bobot → skala 100
-        $mm = $db->prepare('SELECT SUM(ans.points_awarded) got, SUM(q.bobot) maxb
-                            FROM exam_answers ans JOIN questions q ON q.id=ans.question_id
-                            WHERE ans.attempt_id=? AND ans.review_status="reviewed" AND q.tipe_jawaban IN ("essay","file_upload")');
-        $mm->execute([(int)$a['id']]); $mrow = $mm->fetch();
-        $manual = ($mrow['maxb'] > 0) ? round($mrow['got'] / $mrow['maxb'] * 100, 2) : null;
-
-        $final = null;
-        if ($a['score_auto'] !== null && $manual !== null) $final = round(((float)$a['score_auto'] + $manual) / 2, 2);
-        elseif ($a['score_auto'] !== null) $final = (float)$a['score_auto'];
-        elseif ($manual !== null)          $final = $manual;
-
-        $db->prepare('UPDATE exam_attempts SET score_manual=?, final_score=?, status="reviewed" WHERE id=?')
-           ->execute([$manual, $final, (int)$a['id']]);
-    }
 }
 
 /* ---------- Data jawaban untuk tampilan ---------- */
@@ -238,7 +230,7 @@ require_once __DIR__ . '/includes/header.php';
             <option value="not_recommended"  <?= ($psy['rekomendasi']??'')==='not_recommended'?'selected':'' ?>>❌ Not Recommended</option>
           </select></div>
         <div class="form-group"><label class="form-label">Skor Manual Psikotes (0–100, opsional)</label>
-          <input type="number" min="0" max="100" step="1" name="score_manual" class="form-control" placeholder="Isi bila memberi bobot numerik" value=""></div>
+          <input type="number" min="0" max="100" step="1" name="score_manual" class="form-control" placeholder="Isi bila memberi bobot numerik" value="<?= e($psy['skor_manual'] ?? '') ?>"></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Kelebihan</label>

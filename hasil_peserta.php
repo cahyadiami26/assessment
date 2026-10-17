@@ -228,7 +228,7 @@ if ($attemptId):
         <div>
           <?php if (!empty($psycho['lampiran_pdf'])): ?>
             <label class="form-label">Lampiran Analisis (PDF)</label><br>
-            📕 <a href="uploads/psycho_reports/<?= e($psycho['lampiran_pdf']) ?>" target="_blank"><?= e($psycho['lampiran_pdf']) ?></a>
+            📕 <a href="uploads/psychotes_reports/<?= e($psycho['lampiran_pdf']) ?>" target="_blank"><?= e($psycho['lampiran_pdf']) ?></a>
           <?php endif; ?>
         </div>
       </div>
