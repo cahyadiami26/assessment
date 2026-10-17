@@ -44,16 +44,19 @@ if (isManagement() && !isAdmin()) $userRole = 'Manajemen';
 
       <?php if (isHrd()): ?>
         <div class="nav-section">Kelola Assessment</div>
+        <a href="kategori_soal.php" class="<?= $activeMenu==='kategori_soal'?'active':'' ?>"><span class="ico">🏷️</span> Kategori Soal</a>
         <a href="bank_soal.php" class="<?= $activeMenu==='bank_soal'?'active':'' ?>"><span class="ico">🗂️</span> Bank Soal</a>
         <a href="modul_test.php" class="<?= $activeMenu==='modul'?'active':'' ?>"><span class="ico">🧩</span> Modul Tes</a>
         <a href="paket_test.php" class="<?= $activeMenu==='paket'?'active':'' ?>"><span class="ico">📦</span> Paket & Jadwal</a>
         <a href="hr_review.php" class="<?= $activeMenu==='review'?'active':'' ?>"><span class="ico">🧑‍⚖️</span> Antrean Periksa</a>
+        <a href="hasil_peserta.php" class="<?= $activeMenu==='hasil_peserta'?'active':'' ?>"><span class="ico">🔍</span> Hasil & Jawaban</a>
         <a href="laporan.php" class="<?= $activeMenu==='laporan'?'active':'' ?>"><span class="ico">📄</span> Laporan PDF</a>
       <?php endif; ?>
 
       <?php if (isManagement() && !isHrd()): ?>
         <div class="nav-section">Monitoring</div>
         <a href="manajemen.php" class="<?= $activeMenu==='manajemen'?'active':'' ?>"><span class="ico">📈</span> Summary & Laporan</a>
+        <a href="hasil_peserta.php" class="<?= $activeMenu==='hasil_peserta'?'active':'' ?>"><span class="ico">🔍</span> Hasil & Jawaban Peserta</a>
       <?php endif; ?>
 
       <div class="nav-section">Saya</div>
