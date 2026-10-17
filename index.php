@@ -109,6 +109,8 @@ if ($leader) {
     <div style="font-size:30px">🗂️</div><h4>Buat Soal Baru</h4>
     <p class="text-muted">TPA, PAPI, DISC, Praktik Office, Esai.</p>
     <a class="btn btn-primary w-100" href="bank_soal.php?aksi=tambah">+ Tambah Soal</a>
+    <a class="btn btn-outline w-100" href="kategori_soal.php?aksi=tambah" style="margin-top:8px">🏷️ Kelola Kategori Soal</a>
+    <a class="btn btn-outline w-100" href="hasil_peserta.php" style="margin-top:8px">🔍 Lihat Hasil &amp; Jawaban Peserta</a>
   </div></div>
   <div class="card"><div class="card-body text-center">
     <div style="font-size:30px">📦</div><h4>Susun Paket Tes</h4>

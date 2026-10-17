@@ -49,6 +49,7 @@ require_once __DIR__ . '/includes/header.php';
   <div class="card-header">
     <div><h3>🧑‍⚖️ Review Queue — Penilaian Manual HR</h3>
       <span class="sub">Esai, praktik file upload, dan interpretasi psikotes (PAPI/DISC/Motivasi)</span></div>
+  <a class="btn btn-outline btn-sm" href="hasil_peserta.php">🔍 Semua Hasil &amp; Jawaban Peserta</a>
   </div>
   <div class="card-body" style="padding-bottom:0">
     <div class="tabs">

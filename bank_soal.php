@@ -312,6 +312,7 @@ if ($formMode === 'edit') {
         <span class="sub">Total <?= count($rows) ?> soal ditampilkan · mendukung TPA, Psikotes, Software Office & Esai</span>
       </div>
       <a class="btn btn-primary btn-sm" href="bank_soal.php?aksi=tambah">+ Tambah Soal</a>
+      <a class="btn btn-outline btn-sm" href="kategori_soal.php">🏷️ Kelola Kategori</a>
     </div>
     <div class="card-body" style="padding-bottom:6px">
       <form method="get" class="grid grid-3" style="gap:12px">
