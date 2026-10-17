@@ -60,6 +60,16 @@ foreach ($perAttempt as $aid => $v) {
     $nAtt++;
 }
 
-$msg = "Selesai. Kunci ternormalisasi: $nKunci soal · Jawaban dikoreksi: $nFix · Attempt di-recompute: $nAtt";
+// 4) Konsolidasi ulang skor manual & final + status review untuk SEMUA attempt
+//    (memakai logika yang sama dengan panel HR: recalcAttemptScore)
+$nRecap = 0;
+$allAtt = $db->query("SELECT id FROM exam_attempts WHERE status IN ('submitted','reviewed')")->fetchAll(PDO::FETCH_COLUMN);
+foreach ($allAtt as $aid) {
+    // jika attempt sebelumnya terlanjur 'reviewed' padahal masih ada pending, biarkan fungsi memutuskan
+    recalcAttemptScore($db, (int)$aid);
+    $nRecap++;
+}
+
+$msg = "Selesai. Kunci ternormalisasi: $nKunci soal · Jawaban dikoreksi: $nFix · Attempt di-recompute: $nAtt · Skor ter-konsolidasi (auto+manual): $nRecap attempt";
 if (PHP_SAPI === 'cli') { echo $msg . PHP_EOL; }
 else { echo '<pre style="font-family:monospace;padding:20px">' . htmlspecialchars($msg) . '</pre>'; }

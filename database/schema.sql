@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS psycho_evaluations (
   kelebihan TEXT NULL,
   area_pengembangan TEXT NULL,
   catatan_hr TEXT NULL,
+  skor_manual DECIMAL(6,2) NULL,               -- skor numerik opsional dari form psikotes (0-100)
   lampiran_pdf VARCHAR(255) NULL,              -- hasil analisis psikotes dari HR
   evaluated_by INT NULL,
   evaluated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
