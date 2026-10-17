@@ -1,4 +1,43 @@
 <?php
+/* ============================================================
+ * NORMALISASI JAWABAN PILIHAN GANDA (AUTO-GRADING)
+ * Kunci jawaban lama bisa tersimpan sebagai label ("A", "B")
+ * atau indeks numerik ("0","1"). Jawaban peserta berupa indeks.
+ * Fungsi ini menormalkan keduanya menjadi indeks berbasis 0.
+ * ============================================================ */
+function normalizeAnswerKeys($raw, int $numOptions = 0): array {
+    if (is_string($raw)) $raw = json_decode($raw, true);
+    if ($raw === null) return [];
+    if (!is_array($raw)) $raw = [$raw];
+    $out = [];
+    foreach ($raw as $v) {
+        $v = trim((string)$v);
+        if ($v === '') continue;
+        // Label huruf A-Z (atau a-z) -> indeks 0-25
+        if (preg_match('/^([a-zA-Z])$/', $v, $m)) {
+            $idx = ord(strtoupper($m[1])) - 65;
+            // Jika tidak masuk akal untuk jumlah opsi, lewati
+            if ($numOptions > 0 && $idx >= $numOptions) continue;
+            $out[] = (string)$idx;
+            continue;
+        }
+        // Indeks numerik langsung
+        if (ctype_digit($v)) { $out[] = (string)(int)$v; continue; }
+        // Format tak dikenal — kembalikan apa adanya
+        $out[] = $v;
+    }
+    return array_values(array_unique($out));
+}
+
+/** Bandingkan jawaban peserta vs kunci (case/urutan-insensitif, ternormalisasi). */
+function answersMatch($pesertaRaw, $kunciRaw, int $numOptions = 0): bool {
+    $a = normalizeAnswerKeys($pesertaRaw, $numOptions);
+    $b = normalizeAnswerKeys($kunciRaw, $numOptions);
+    if (!$b) return false;              // tanpa kunci -> dianggap belum dinilai (salah)
+    sort($a); sort($b);
+    return $a === $b;
+}
+
 /**
  * Helper upload berkas aman (jawaban praktik, file referensi, laporan psikotes).
  */

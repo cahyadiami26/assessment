@@ -119,7 +119,9 @@ $userRef = $part['candidate_name'] ?? ($_SESSION['user_name'] ?? 'Peserta');
 
   <form id="examForm" onsubmit="return submitExam(event)">
   <?php foreach ($questions as $i => $q):
-      $qid = (int)$q['id']; $sv = $saved[$qid] ?? null; $opsi = json_decode((string)$q['opsi'], true) ?: []; ?>
+      $qid = (int)$q['id']; $sv = $saved[$qid] ?? null; $opsi = json_decode((string)$q['opsi'], true) ?: [];
+      // Normalisasi jawaban tersimpan (indeks berbasis 0, kompatibel format lama "A"/"B")
+      $selIdx = $sv ? normalizeAnswerKeys($sv['answer_options'] ?? '', count($opsi)) : []; ?>
     <div class="question-card mb-2" data-qid="<?= $qid ?>" id="q<?= $qid ?>">
       <div class="flex justify-between items-center mb-1">
         <span class="badge badge-info">Soal <?= $i+1 ?> / <?= count($questions) ?></span>
@@ -129,18 +131,17 @@ $userRef = $part['candidate_name'] ?? ($_SESSION['user_name'] ?? 'Peserta');
 
       <?php if ($q['tipe_jawaban'] === 'single'): ?>
         <?php foreach ($opsi as $k => $o): ?>
-          <label class="option-row <?= $sv && in_array((string)$k, (array)json_decode((string)$sv['answer_options'],true)[0] ?? '', true) ? 'selected':'' ?>">
-            <input type="radio" name="ans[<?= $qid ?>]" value="<?= $k ?>" onchange="onAnswer(this)" <?= $sv && (json_decode((string)$sv['answer_options'],true)[0] ?? null)===$k?'checked':'' ?>>
+          <label class="option-row <?= in_array((string)$k, $selIdx, true) ? 'selected':'' ?>">
+            <input type="radio" name="ans[<?= $qid ?>]" value="<?= $k ?>" onchange="onAnswer(this)" <?= in_array((string)$k, $selIdx, true)?'checked':'' ?>>
             <span><b><?= chr(65+$k) ?>.</b> <?= e($o) ?></span>
           </label>
         <?php endforeach; ?>
 
       <?php elseif ($q['tipe_jawaban'] === 'multiple'): ?>
         <p class="form-hint mb-1">Pilih lebih dari satu jawaban yang benar.</p>
-        <?php $selKunci = array_map('strval', (array)json_decode((string)($sv['answer_options'] ?? '[]'), true)); ?>
         <?php foreach ($opsi as $k => $o): ?>
-          <label class="option-row <?= in_array((string)$k,$selKunci)?'selected':'' ?>">
-            <input type="checkbox" name="ans[<?= $qid ?>][]" value="<?= $k ?>" onchange="onAnswer(this)" <?= in_array((string)$k,$selKunci)?'checked':'' ?>>
+          <label class="option-row <?= in_array((string)$k,$selIdx,true)?'selected':'' ?>">
+            <input type="checkbox" name="ans[<?= $qid ?>][]" value="<?= $k ?>" onchange="onAnswer(this)" <?= in_array((string)$k,$selIdx,true)?'checked':'' ?>>
             <span><b><?= chr(65+$k) ?>.</b> <?= e($o) ?></span>
           </label>
         <?php endforeach; ?>

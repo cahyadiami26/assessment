@@ -90,8 +90,9 @@ if ($attemptId):
         $t = $a['tipe_jawaban'];
 
         if ($t === 'single' || $t === 'multiple') {
-            $kunciIdx = (!$isNote && is_array($kunci)) ? array_map('strval', $kunci) : [];
-            $ansIdx   = is_array($ansOpts) ? array_map('strval', $ansOpts) : [];
+            // Normalisasi kunci & jawaban (kompatibel data lama berformat label "A"/"B")
+            $kunciIdx = (!$isNote && $a['kunci_jawaban']) ? normalizeAnswerKeys($a['kunci_jawaban'], count((array)$opsi)) : [];
+            $ansIdx   = $a['answer_options'] ? normalizeAnswerKeys($a['answer_options'], count((array)$opsi)) : [];
             echo '<div style="display:flex;flex-direction:column;gap:6px">';
             foreach ((array)$opsi as $i => $o) {
                 $letter = chr(65 + $i);
